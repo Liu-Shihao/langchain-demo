@@ -2,7 +2,7 @@
 
 官方网站：https://www.langchain.com/
 
-Install:
+# Install Dependencies
 ```commandline
 pip install langchain
 
