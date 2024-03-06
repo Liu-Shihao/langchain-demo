@@ -8,6 +8,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 """
+https://python.langchain.com/docs/use_cases/question_answering/
+
 Retrieval and generation: the actual RAG chain, which takes the user query at run time and retrieves the relevant data from the index, then passes that to the model.
 The full sequence from raw data to answer will look like:
 
