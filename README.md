@@ -9,5 +9,8 @@ pip install -r requirements.txt
 ```
 
 
+# Spacy 
+https://spacy.io/usage
+
 
 
