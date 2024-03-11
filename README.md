@@ -2,12 +2,11 @@
 
 官方网站：https://www.langchain.com/
 
-# Install Dependencies
+# Setup
 ```commandline
-pip install langchain
-
+python -m venv venv
+pip install -r requirements.txt
 ```
-
 
 
 
