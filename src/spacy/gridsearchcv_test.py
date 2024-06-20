@@ -1,77 +1,49 @@
 import spacy
-from sklearn.base import BaseEstimator
 from spacy.training import Example
+from spacy.util import load_config
+from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import classification_report, make_scorer, accuracy_score
-import numpy as np
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import KFold
+import copy
+import warnings
 
-# 准备数据（假设你已经准备好了数据）
-train_data = [
-    ("I want transfer to Ajay $100 Tomorrow", {"cats": {"TRANSFER": 1.0, "SPORTS": 0.0, "FOOD": 0.0, "TRAVEL": 0.0}}),
-    ("I want to play football", {"cats": {"TRANSFER": 0.0, "SPORTS": 1.0, "FOOD": 0.0, "TRAVEL": 0.0}}),
-    ("I want to eat watermelon.", {"cats": {"TRANSFER": 0.0, "SPORTS": 0.0, "FOOD": 1.0, "TRAVEL": 0.0}}),
-    ("I want to go to Malaysia", {"cats": {"TRANSFER": 0.0, "SPORTS": 0.0, "FOOD": 0.0, "TRAVEL": 1.0}}),
-    # Add more examples as needed
-]
-
-# 定义spaCy的train config模板
-config_template = {
-    "nlp": {
-        "textcat": {
-            "architecture": "simple_cnn",
-            "threshold": 0.5,
-        }
-    },
-    "training": {
-        "batcher": {
-            "discard_oversize": True,
-            "size": 2000,
-            "get_length": None,
-        },
-        "optimizer": {
-            "learn_rate": 0.001,  # 默认的学习率
-        },
-        "patience": 100,  # 默认的耐心值
-        "max_epochs": 20,  # 默认的最大迭代次数
-        "eval_frequency": 1000,
-    }
-}
-
-# 设置参数网格
-param_grid = {
-    'training.batcher.size': [1000, 2000, 3000],
-    'training.patience': [50, 100, 200],
-    'training.optimizer.learn_rate': [0.001, 0.01, 0.1],
-    'training.max_epochs': [10, 20, 30],
-}
-
-# 设置评估指标
-def custom_scorer(y_true, y_pred):
-    # 假设这里使用准确率作为评估指标
-    return accuracy_score(y_true, y_pred)
-
-# 实例化spaCy的blank模型
-nlp = spacy.blank('en')
-textcat = nlp.add_pipe('textcat')
-textcat.add_label('TRANSFER')
-textcat.add_label('SPORTS')
-textcat.add_label('FOOD')
-textcat.add_label('TRAVEL')
+# 忽略不重要的警告
+warnings.filterwarnings("ignore", category=UserWarning, module='spacy')
 
 
-# 定义一个包装器类，使spaCy模型能够与GridSearchCV兼容
 class SpacyClassifier(BaseEstimator):
-    def __init__(self, config_template):
-        self.config_template = config_template
-        self.nlp = spacy.blank('en')
-        self.textcat = self.nlp.add_pipe('textcat')
-        self.textcat.add_label('TRANSFER')
-        self.textcat.add_label('SPORTS')
-        self.textcat.add_label('FOOD')
-        self.textcat.add_label('TRAVEL')
+    def __init__(self, config_path, dropout=None, patience=None, learn_rate=None, max_epochs=None, max_steps=None):
+        self.config_path = config_path
+        self.dropout = dropout
+        self.patience = patience
+        self.learn_rate = learn_rate
+        self.max_epochs = max_epochs
+        self.max_steps = max_steps
+        self.config = load_config(config_path)
+        self.nlp = None
 
     def fit(self, X, y=None):
-        # 转换数据格式
+        config = copy.deepcopy(self.config)
+
+        if self.dropout is not None:
+            config['training']['dropout'] = self.dropout
+        if self.patience is not None:
+            config['training']['patience'] = self.patience
+        if self.learn_rate is not None:
+            config['training']['optimizer']['learn_rate'] = self.learn_rate
+        if self.max_epochs is not None:
+            config['training']['max_epochs'] = self.max_epochs
+        if self.max_steps is not None:
+            config['training']['max_steps'] = self.max_steps
+
+        self.nlp = spacy.blank(config['nlp']['lang'])
+        textcat = self.nlp.add_pipe('textcat')
+        textcat.add_label('A')
+        textcat.add_label('B')
+        textcat.add_label('C')
+        textcat.add_label('D')
+
         train_texts = [item[0] for item in X]
         train_cats = [item[1] for item in X]
 
@@ -79,24 +51,47 @@ class SpacyClassifier(BaseEstimator):
         for text, cats in zip(train_texts, train_cats):
             train_examples.append(Example.from_dict(self.nlp.make_doc(text), cats))
 
-        # 初始化模型并训练
+        # 初始化模型
         self.nlp.initialize(lambda: train_examples)
-        self.nlp.train(train_examples, None, config=self.config_template)
+
+        # 使用update方法进行训练
+        for epoch in range(self.max_epochs if self.max_epochs else 20):
+            losses = {}
+            self.nlp.update(train_examples, drop=self.dropout if self.dropout else 0.1, losses=losses)
+            if epoch % 10 == 0:
+                print(f"Epoch {epoch}, Loss: {losses['textcat']}")
 
     def predict(self, X):
-        # 在输入数据上进行预测
         return [max(self.nlp(text).cats, key=self.nlp(text).cats.get) for text in X]
 
 
-# 创建一个SpacyClassifier对象作为estimator
-spacy_classifier = SpacyClassifier(config_template)
+# 示例训练数据
+train_data = [
+    ("Text of example A", {"cats": {"A": 1.0, "B": 0.0, "C": 0.0, "D": 0.0}}),
+    ("Text of example B", {"cats": {"A": 0.0, "B": 1.0, "C": 0.0, "D": 0.0}}),
+    # Add more examples as needed
+]
 
-# 创建GridSearchCV对象
-grid_search = GridSearchCV(estimator=spacy_classifier, param_grid=param_grid, scoring='accuracy', cv=3, verbose=1)
+# 超参数网格
+param_grid = {
+    'dropout': [0.1, 0.5],
+    'patience': [10, 50],
+    'learn_rate': [0.0001, 0.01],
+    'max_epochs': [10, 50],
+    'max_steps': [1000, 5000],
+}
 
-# 执行网格搜索
+# 配置文件路径
+config_path = "config.cfg"
+spacy_classifier = SpacyClassifier(config_path)
+
+# K折交叉验证
+kf = KFold(n_splits=5)
+grid_search = GridSearchCV(estimator=spacy_classifier, param_grid=param_grid, scoring='accuracy', cv=kf, verbose=1,
+                           n_jobs=-1)
+
+# 训练模型并进行参数调优
 grid_search.fit(train_data)
 
-# 输出最佳参数和评估结果
 print("Best parameters found: ", grid_search.best_params_)
 print("Best score found: ", grid_search.best_score_)
